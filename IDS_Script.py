@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 
 from threading import Thread
-import time,sys,subprocess
-from scapy.all import Dot11, Dot11Deauth, Dot11Disas, RadioTap, sendp, sniff, conf, EAPOL
+import time,sys,subprocess,os
+from scapy.all import Dot11, Dot11Deauth, Dot11Disas, RadioTap, Dot11Elt, sendp, sniff, conf, EAPOL
 
 if len(sys.argv) < 2:
 	chan = input('Enter Channel: ')
 else :
 	chan=sys.argv[1]
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WHITELIST = os.path.join(SCRIPT_DIR, 'whitelist.txt')
+
 #bssid=sys.argv[2]
 
 subprocess.run("sudo airmon-ng check kill > /dev/null", shell=True, executable="/bin/bash")
@@ -19,18 +23,20 @@ COUNT_BEACON = 0
 COUNT_DIS = 0
 COUNT_DEAUTH = 0
 COUNT_AUTH = 0
+COUNT_SPOOF = 0
 
 s=conf.L2socket(iface='wlan0')
 
-whitelist = {
-	'eridal' : '5A:6D:67:AC:90:90',
-	'donkey994' : '5A:6D:67:AE:0F:D8'
-}
+def read_file(file):
+	with open(file, 'r') as f:
+		return [line.casefold() for line in f.readlines()]
 
 def Process_Frame(packet):
 	if packet.type == 0:
 		if (packet.subtype == 0 or packet.subtype ==2): #Association Request
 			assoc_check(packet)
+		if (packet.subtype == 4 or packet.subtype == 5): #Probe
+			probe_check(packet)
 		if packet.subtype == 8: #Beacon
 			beacon_check(packet)
 		if packet.subtype == 10: #Disassocation
@@ -45,29 +51,53 @@ def counter():
 	global COUNT_DIS
 	global COUNT_DEAUTH
 	global COUNT_AUTH
+	global COUNT_SPOOF
 	bflood_limit = 400
 	oflood_limit = 100
 	while True:
 		time.sleep(3)
 		if COUNT_BEACON >= bflood_limit:
-			print("BEACON FLOOD!!!")
+			print(f"WARNING: BEACON FLOOD, {COUNT_BEACON} Frames Caputres")
 		if COUNT_DIS >= oflood_limit:
-			print("DISASSOCIATION FLOOD!!!")
+			print(f"WARNING: DISASSOCIATION FLOOD, {COUNT_DIS} Frames Captured")
 		if COUNT_DEAUTH >= oflood_limit:
-			print("DEAUTHENTICATION FLOOD!!!")
+			print(f"WARNING: DEAUTHENTICATION FLOOD, {COUNT_DEAUTH} Frames Captured")
 		if COUNT_AUTH >= oflood_limit:
-			print("AUTHENTICATION FLOOD!!!")
-		print("Cycle Reset")
+			print(f"WARNING: AUTHENTICATION FLOOD, {COUNT_AUTH} Frames Captured")
+		if COUNT_SPOOF > 0:
+			print(f"WARNING: {COUNT_SPOOF} Spoofed Frames Captured")
 		COUNT_BEACON = 0
 		COUNT_DIS = 0
 		COUNT_DEAUTH = 0
 		COUNT_AUTH = 0
+		COUNT_SPOOF = 0
 
 def assoc_check(packet):
+	global COUNT_SPOOF
+	if packet[Dot11Elt].ID != 0:
+                COUNT_SPOOF += 1
 	print("association frame")
+
+def probe_check(packet):
+	global COUNT_SPOOF
+	if packet[Dot11Elt].ID != 0:
+                COUNT_SPOOF += 1
 
 def beacon_check(packet):
 	global COUNT_BEACON
+	global COUNT_SPOOF
+	ssid = str(packet[Dot11Elt].info)
+	ssid = ssid.split("'")
+	ssid = ssid[1]
+	bssid = packet.addr2
+	if len(ssid) == 0:
+		ssid = "None"
+	if bssid.casefold() not in read_file(WHITELIST):
+		print(f"WARNING: Rogue AP, {ssid}, {bssid}")
+		#craft_deauth(packet,s)
+		return None
+	if ssid == "None":
+		COUNT_SPOOF += 1
 	COUNT_BEACON += 1
 
 def dis_check(packet):
@@ -98,15 +128,13 @@ def Process_Frame(packet):
 
 		print('Association Request detected ::::  deauth frames injected toward client --> '+packet.addr2)
 
-
-def Craft_Deauth(packet,s):
-	
+'''
+def craft_deauth(packet,s):
 	deauth_frame_client=RadioTap()/Dot11(type=0,subtype=12,addr1=packet.addr2,addr2=packet.addr1,addr3=packet.addr1)/Dot11Deauth(reason=3)
 	deauth_frame_AP = RadioTap()/Dot11(type=0,subtype=10,addr1=packet.addr1,addr2=packet.addr2,addr3=packet.addr1)/Dot11Disas(reason=3)
-	for i in range(1,100):
+	for i in range(1,10):
 		s.send(deauth_frame_client)
 		s.send(deauth_frame_AP)
-'''
 
 counter_thread = Thread(target=counter)
 counter_thread.daemon = True
