@@ -12,7 +12,7 @@ else :
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WHITELIST = os.path.join(SCRIPT_DIR, 'whitelist.txt')
 
-#bssid=sys.argv[2]
+bssids = ['5A:6D:67:AC:90:90']
 
 subprocess.run("sudo airmon-ng check kill > /dev/null", shell=True, executable="/bin/bash")
 subprocess.run("sudo airmon-ng start wlan0 > /dev/null", shell=True, executable="/bin/bash")
@@ -29,7 +29,7 @@ s=conf.L2socket(iface='wlan0')
 
 def read_file(file):
 	with open(file, 'r') as f:
-		return [line.casefold() for line in f.readlines()]
+		return [line.strip().casefold() for line in f.readlines()]
 
 def Process_Frame(packet):
 	if packet.type == 0:
@@ -53,7 +53,7 @@ def counter():
 	global COUNT_AUTH
 	global COUNT_SPOOF
 	bflood_limit = 400
-	oflood_limit = 100
+	oflood_limit = 50
 	while True:
 		time.sleep(3)
 		if COUNT_BEACON >= bflood_limit:
@@ -87,6 +87,10 @@ def probe_check(packet):
 	ssid = ssid[1]
 	if len(ssid) == 0:
 		COUNT_SPOOF += 1
+	if (packet.addr1.casefold() in read_file(WHITELIST) and not packet.haslayer(Dot11EltRSN)):
+                print(f"WARNING: Evil Twin")
+                #craft_deauth(packet,s)
+
 
 def beacon_check(packet):
 	global COUNT_BEACON
@@ -98,7 +102,7 @@ def beacon_check(packet):
 	if len(ssid) == 0:
 		ssid = "None"
 	if bssid.casefold() not in read_file(WHITELIST):
-		print(f"WARNING: Rogue AP, {ssid}, {bssid}")
+		#print(f"WARNING: Rogue AP, {ssid}, {bssid}")
 		#craft_deauth(packet,s)
 		COUNT_BEACON += 1
 		return None
@@ -113,24 +117,27 @@ def beacon_check(packet):
 
 def dis_check(packet):
 	global COUNT_DIS
-	COUNT_DIS += 1
+	if packet.addr2.casefold() in read_file(WHITELIST):
+		COUNT_DIS += 1
 
 def deauth_check(packet):
 	global COUNT_DEAUTH
-	COUNT_DEAUTH += 1
+	if packet.addr2.casefold() in read_file(WHITELIST):
+		COUNT_DEAUTH += 1
 
 def auth_check(packet):
 	global COUNT_AUTH
-	COUNT_AUTH += 1
+	if packet.addr1.casefold() in read_file(WHITELIST):
+		COUNT_AUTH += 1
 
-
-'''
 def craft_deauth(packet,s):
 	deauth_frame_client=RadioTap()/Dot11(type=0,subtype=12,addr1=packet.addr2,addr2=packet.addr1,addr3=packet.addr1)/Dot11Deauth(reason=3)
 	deauth_frame_AP = RadioTap()/Dot11(type=0,subtype=10,addr1=packet.addr1,addr2=packet.addr2,addr3=packet.addr1)/Dot11Disas(reason=3)
 	for i in range(1,10):
 		s.send(deauth_frame_client)
 		s.send(deauth_frame_AP)
+
+print(read_file(WHITELIST))
 
 counter_thread = Thread(target=counter)
 counter_thread.daemon = True
