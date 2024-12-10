@@ -2,7 +2,7 @@
 
 from threading import Thread
 import time,sys,subprocess,os
-from scapy.all import Dot11, Dot11Deauth, Dot11Disas, RadioTap, Dot11Elt, sendp, sniff, conf, EAPOL
+from scapy.all import Dot11, Dot11Deauth, Dot11Disas, RadioTap, Dot11Elt, sendp, sniff, conf, EAPOL, Dot11EltRSN
 
 if len(sys.argv) < 2:
 	chan = input('Enter Channel: ')
@@ -74,14 +74,19 @@ def counter():
 
 def assoc_check(packet):
 	global COUNT_SPOOF
-	if packet[Dot11Elt].ID != 0:
-                COUNT_SPOOF += 1
-	print("association frame")
+	ssid = str(packet[Dot11Elt].info)
+	ssid = ssid.split("'")
+	ssid = ssid[1]
+	if len(ssid) == 0:
+		COUNT_SPOOF += 1
 
 def probe_check(packet):
 	global COUNT_SPOOF
-	if packet[Dot11Elt].ID != 0:
-                COUNT_SPOOF += 1
+	ssid = str(packet[Dot11Elt].info)
+	ssid = ssid.split("'")
+	ssid = ssid[1]
+	if len(ssid) == 0:
+		COUNT_SPOOF += 1
 
 def beacon_check(packet):
 	global COUNT_BEACON
@@ -95,6 +100,12 @@ def beacon_check(packet):
 	if bssid.casefold() not in read_file(WHITELIST):
 		print(f"WARNING: Rogue AP, {ssid}, {bssid}")
 		#craft_deauth(packet,s)
+		COUNT_BEACON += 1
+		return None
+	if not packet.haslayer(Dot11EltRSN):
+		print(f"WARNING: Evil Twin")
+		#craft_deauth(packet,s)
+		COUNT_BEACON += 1
 		return None
 	if ssid == "None":
 		COUNT_SPOOF += 1
@@ -112,21 +123,6 @@ def auth_check(packet):
 	global COUNT_AUTH
 	COUNT_AUTH += 1
 
-
-'''
-def Process_Frame(packet):
-
-	if  ((packet.subtype == 11 and packet.seqnum == 1) or (packet.subtype == 0)) and packet.addr1.casefold() == bssid.casefold():
-
-		Craft_Deauth(packet,s)
-
-		print('Client Authentication detected :::: deauth frames injected toward client --> '+packet.addr2)
-
-	elif packet.subtype == 0 and packet.addr1.casefold() == bssid.casefold() :
-
-		Craft_Deauth(packet,s)
-
-		print('Association Request detected ::::  deauth frames injected toward client --> '+packet.addr2)
 
 '''
 def craft_deauth(packet,s):
